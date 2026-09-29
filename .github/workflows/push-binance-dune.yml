@@ -15,7 +15,7 @@ concurrency:
 jobs:
   push:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -28,7 +28,9 @@ jobs:
       - name: Fetch last 7 days and push to Dune
         env:
           DUNE_API_KEY: ${{ secrets.DUNE_API_KEY }}
-          # Add more pairs later, comma-separated, e.g. "SOLUSDC,ZECUSDC,PUMPUSDC,TRUMPUSDC"
-          SYMBOLS: "SOLUSDC"
+          # Binance spot symbols (base+quote, no separator). Unlisted symbols
+          # are skipped automatically. Note: USDC/USD1 is listed as USD1USDC.
+          # Leave this unset to use the defaults baked into the script.
+          SYMBOLS: "SOLUSDC,USDCUSDT,SOLUSDT,USD1USDC,SOLUSD1,PUMPUSDC,ZECUSDC,HYPEUSDC,BONKUSDC,PENGUUSDC,TRUMPUSDC"
           DAYS: "7"
         run: python push_binance_to_dune.py
