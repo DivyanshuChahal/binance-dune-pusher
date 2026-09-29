@@ -14,10 +14,14 @@ What it does (per run):
     is exactly "drop the oldest day, add the newest" -- an atomic rolling
     window with no dedup needed.
 
+Symbols that don't exist on Binance are SKIPPED (logged, not failed), so you
+can list pairs that aren't listed yet; they auto-activate once Binance lists
+them. Each symbol goes to its own table: binance_<symbol>_1s_ohlc_7d.
+
 Only required configuration:  DUNE_API_KEY  (env var / GitHub secret)
 
 Optional env vars:
-  SYMBOLS         comma-separated Binance symbols   (default "SOLUSDC")
+  SYMBOLS         comma-separated Binance symbols (default: the list below)
   DAYS            window length in days             (default "7")
   TABLE_PREFIX    Dune table name prefix           (default "binance_")
   TABLE_SUFFIX    Dune table name suffix           (default "_1s_ohlc_7d")
@@ -39,8 +43,28 @@ import urllib.request
 import urllib.error
 
 # ----------------------------- configuration --------------------------------
+# Binance SPOT symbols (base+quote, no separator). Note: Binance lists the
+# USDC/USD1 pair reversed as USD1USDC (price = USDC per USD1).
+DEFAULT_SYMBOLS = [
+    "SOLUSDC",   # SOL-USDC
+    "USDCUSDT",  # USDC-USDT
+    "SOLUSDT",   # SOL-USDT
+    "USD1USDC",  # USDC-USD1  (listed reversed: price is USDC per USD1)
+    "SOLUSD1",   # SOL-USD1
+    "PUMPUSDC",  # PUMP-USDC
+    "ZECUSDC",   # ZEC-USDC
+    "HYPEUSDC",  # HYPE-USDC
+    "BONKUSDC",  # BONK-USDC
+    "PENGUUSDC", # PENGU-USDC
+    "TRUMPUSDC", # TRUMP-USDC
+    # Not on Binance as of writing -- left in so they auto-activate if listed:
+    # "CASHUSDC", "CBBTCUSDC", "USELESSUSDC", "FARTCOINUSDC",
+]
+
 DUNE_API_KEY = os.environ.get("DUNE_API_KEY")
-SYMBOLS      = [s.strip().upper() for s in os.environ.get("SYMBOLS", "SOLUSDC").split(",") if s.strip()]
+_env_symbols = os.environ.get("SYMBOLS", "")
+SYMBOLS      = ([s.strip().upper() for s in _env_symbols.split(",") if s.strip()]
+                if _env_symbols.strip() else DEFAULT_SYMBOLS)
 WINDOW_DAYS  = int(os.environ.get("DAYS", "7"))
 TABLE_PREFIX = os.environ.get("TABLE_PREFIX", "binance_")
 TABLE_SUFFIX = os.environ.get("TABLE_SUFFIX", "_1s_ohlc_7d")
@@ -97,6 +121,24 @@ def get_json(url, retries=5, timeout=60):
     raise RuntimeError(f"GET json failed after {retries} tries: {url}: {last}")
 
 
+def binance_symbol_exists(symbol, retries=3):
+    """True if the symbol trades on Binance spot. False on 'invalid symbol'.
+    On transient failures, assume True and let the main flow surface errors."""
+    url = f"{REST_BASE}?symbol={symbol}&interval=1s&limit=1"
+    for i in range(retries):
+        try:
+            with _urlopen(url, timeout=30) as r:
+                data = json.loads(r.read())
+                return isinstance(data, list) and len(data) > 0
+        except urllib.error.HTTPError as e:
+            if e.code == 400:      # -1121 Invalid symbol
+                return False
+            time.sleep(1.5 * (i + 1))
+        except Exception:          # noqa: BLE001
+            time.sleep(1.5 * (i + 1))
+    return True
+
+
 # ------------------------------- parsing utils ------------------------------
 def to_ms(ts):
     """Normalize a Binance timestamp to milliseconds (dumps use microseconds,
@@ -150,7 +192,8 @@ def rows_from_dump(symbol, day):
 
 
 def rows_from_rest(symbol, day):
-    """Fetch one full UTC day of 1s klines from the public REST endpoint."""
+    """Fetch one full UTC day of 1s klines from the public REST endpoint.
+    Returns [] for days before the pair was listed."""
     start = int(dt.datetime(day.year, day.month, day.day, tzinfo=dt.timezone.utc).timestamp() * 1000)
     end = start + SECONDS_PER_DAY * 1000  # next-day 00:00:00 (exclusive)
     rows, cur = [], start
@@ -236,25 +279,35 @@ def main():
     print(f"Window    = {days[0]} .. {days[-1]}  ({WINDOW_DAYS} days; current day ignored)")
     print(f"Symbols   = {', '.join(SYMBOLS)}")
 
-    failures = []
+    pushed, skipped, failures = [], [], []
     for symbol in SYMBOLS:
         print(f"== {symbol} ==")
+        if not binance_symbol_exists(symbol):
+            print(f"    SKIP: '{symbol}' is not a valid Binance spot symbol")
+            skipped.append(symbol)
+            continue
         try:
             csv_str, n = build_csv(symbol, days)
             if n < expected * 0.95:
-                print(f"    WARNING: only {n:,} rows (expected ~{expected:,})")
+                print(f"    NOTE: {n:,} rows (< ~{expected:,}); pair may be newly listed")
             table = f"{TABLE_PREFIX}{symbol.lower()}{TABLE_SUFFIX}"
             desc = (f"Binance {symbol} spot 1s OHLC, rolling {WINDOW_DAYS}-day window "
                     f"{days[0]}..{days[-1]} (UTC). Auto-updated daily.")
             upload_to_dune(table, csv_str, desc)
             print(f"    DONE: {n:,} rows -> dune.<your_handle>.{table}")
+            pushed.append(symbol)
         except Exception as e:  # noqa: BLE001 - keep going with other symbols
             print(f"    ERROR for {symbol}: {e}")
             failures.append(symbol)
 
+    print("\nSummary")
+    print(f"  pushed : {', '.join(pushed) or '-'}")
+    print(f"  skipped: {', '.join(skipped) or '-'}  (not on Binance)")
+    print(f"  failed : {', '.join(failures) or '-'}")
+
     if failures:
         sys.exit(f"Completed with failures: {', '.join(failures)}")
-    print("All symbols pushed successfully.")
+    print("Done.")
 
 
 if __name__ == "__main__":
