@@ -1,11 +1,36 @@
 # binance-dune-pusher
 
-Pushes Binance spot **1-second OHLC** data for a rolling **7-day window** to a
-Dune table, every day via GitHub Actions. Starts with **SOL-USDC**.
+Pushes Binance spot **1-second OHLC** data for a rolling **7-day window** to
+Dune, every day via GitHub Actions. One table per pair.
 
 Each run uploads the last 7 *complete* UTC days (the current day is ignored) and
-**replaces** the Dune table, so every day the window rolls forward one day
+**replaces** each Dune table, so every day the window rolls forward one day
 ("drop the oldest, add the newest") automatically — no dedup, no partial days.
+Symbols not listed on Binance are **skipped** (logged, not failed), so you can
+keep pending pairs in the list and they auto-activate once Binance lists them.
+
+## Pairs
+
+| Pair | Binance symbol | Table |
+|---|---|---|
+| SOL-USDC | `SOLUSDC` | `binance_solusdc_1s_ohlc_7d` |
+| USDC-USDT | `USDCUSDT` | `binance_usdcusdt_1s_ohlc_7d` |
+| SOL-USDT | `SOLUSDT` | `binance_solusdt_1s_ohlc_7d` |
+| USDC-USD1 | `USD1USDC` ⚠️ | `binance_usd1usdc_1s_ohlc_7d` |
+| SOL-USD1 | `SOLUSD1` | `binance_solusd1_1s_ohlc_7d` |
+| PUMP-USDC | `PUMPUSDC` | `binance_pumpusdc_1s_ohlc_7d` |
+| ZEC-USDC | `ZECUSDC` | `binance_zecusdc_1s_ohlc_7d` |
+| HYPE-USDC | `HYPEUSDC` | `binance_hypeusdc_1s_ohlc_7d` |
+| BONK-USDC | `BONKUSDC` | `binance_bonkusdc_1s_ohlc_7d` |
+| PENGU-USDC | `PENGUUSDC` | `binance_penguusdc_1s_ohlc_7d` |
+| TRUMP-USDC | `TRUMPUSDC` | `binance_trumpusdc_1s_ohlc_7d` |
+
+⚠️ **USD1USDC** is listed by Binance in reverse: its price is **USDC per USD1**
+(≈1.0), i.e. the inverse of "USDC-USD1". If you need USDC-as-base, use `1/price`.
+
+Not on Binance (skipped automatically): **CASH-USDC**, **cbBTC-USDC**,
+**USELESS-USDC**, **FARTCOIN-USDC**. They're left commented in the script's
+default list so they turn on by themselves if Binance ever lists them.
 
 ## Setup (one thing to configure)
 
@@ -21,12 +46,14 @@ manually any time from the **Actions** tab (**Run workflow**).
 > Tip: run it once manually after adding the secret to create the table and
 > confirm everything works.
 
-## The Dune table
+## The Dune tables
 
-- Table name: **`binance_solusdc_1s_ohlc_7d`**
-- Query it as **`dune.<your_handle>.binance_solusdc_1s_ohlc_7d`**
-  (replace `<your_handle>` with your Dune username; confirm the exact path under
-  Dune → **Data → your uploads** after the first run).
+- One table per pair: **`binance_<symbol>_1s_ohlc_7d`** (see the Pairs table).
+- Query as **`dune.<your_handle>.binance_solusdc_1s_ohlc_7d`** etc. (replace
+  `<your_handle>` with your Dune username; confirm the exact path under Dune →
+  **Data → your uploads** after the first run).
+- API uploads have **no `dataset_` prefix** (that's only for the Dune UI's
+  manual upload), so point queries at `dune.<handle>.binance_solusdc_1s_ohlc_7d`.
 
 Columns (one row per second):
 
